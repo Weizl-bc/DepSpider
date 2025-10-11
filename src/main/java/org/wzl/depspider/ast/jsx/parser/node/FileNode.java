@@ -7,6 +7,7 @@ import org.wzl.depspider.ast.jsx.parser.node.definition.CommentBlock;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Error;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Loc;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Node;
+import org.wzl.depspider.ast.jsx.visitor.JSXNodeVisitor;
 
 import java.util.List;
 

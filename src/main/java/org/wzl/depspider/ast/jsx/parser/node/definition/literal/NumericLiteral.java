@@ -1,6 +1,6 @@
 package org.wzl.depspider.ast.jsx.parser.node.definition.literal;
 
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
+import org.wzl.depspider.ast.jsx.visitor.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.NodeType;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Loc;
 

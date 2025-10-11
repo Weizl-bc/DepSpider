@@ -3,7 +3,7 @@ package org.wzl.depspider.ast.jsx.parser.node.definition.specifier;
 import lombok.Getter;
 import lombok.Setter;
 import org.wzl.depspider.ast.jsx.parser.enumerate.SpecifierType;
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
+import org.wzl.depspider.ast.jsx.visitor.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.NodeType;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Loc;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Node;
