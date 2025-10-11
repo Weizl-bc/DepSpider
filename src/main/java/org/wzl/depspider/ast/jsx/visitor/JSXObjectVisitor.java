@@ -51,6 +51,50 @@ public class JSXObjectVisitor implements JSXNodeVisitor<ObjectRecord> {
         return Collections.unmodifiableList(expressions);
     }
 
+    /**
+     * 记录遍历过程中发现的对象表达式。
+     */
+    public static class ObjectRecord {
+        private final String path;
+        private final ObjectExpression expression;
+
+        public ObjectRecord(String path, ObjectExpression expression) {
+            this.path = path;
+            this.expression = expression;
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public ObjectExpression getExpression() {
+            return expression;
+        }
+
+        @Override
+        public String toString() {
+            String prefix = (path == null || path.isEmpty()) ? "<anonymous>" : path;
+            return prefix + " -> ObjectExpression";
+        }
+    }
+
+    private final List<ObjectRecord> objectRecords = new ArrayList<>();
+    private final Set<ObjectExpression> visitedExpressions =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Deque<String> nameStack = new ArrayDeque<>();
+
+    public List<ObjectRecord> getObjectRecords() {
+        return Collections.unmodifiableList(objectRecords);
+    }
+
+    public List<ObjectExpression> getObjectExpressions() {
+        List<ObjectExpression> expressions = new ArrayList<>(objectRecords.size());
+        for (ObjectRecord record : objectRecords) {
+            expressions.add(record.getExpression());
+        }
+        return Collections.unmodifiableList(expressions);
+    }
+
     @Override
     public ObjectRecord visit(FileNode fileNode) {
         if (fileNode == null) {
