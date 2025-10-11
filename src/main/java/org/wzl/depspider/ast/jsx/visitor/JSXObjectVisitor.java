@@ -32,7 +32,24 @@ import java.util.Set;
 /**
  * Visitor 用于搜集 JSX 文件中出现的对象表达式。
  */
-public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
+public class JSXObjectVisitor implements JSXNodeVisitor<ObjectRecord> {
+
+    private final List<ObjectRecord> objectRecords = new ArrayList<>();
+    private final Set<ObjectExpression> visitedExpressions =
+            Collections.newSetFromMap(new IdentityHashMap<>());
+    private final Deque<String> nameStack = new ArrayDeque<>();
+
+    public List<ObjectRecord> getObjectRecords() {
+        return Collections.unmodifiableList(objectRecords);
+    }
+
+    public List<ObjectExpression> getObjectExpressions() {
+        List<ObjectExpression> expressions = new ArrayList<>(objectRecords.size());
+        for (ObjectRecord record : objectRecords) {
+            expressions.add(record.getExpression());
+        }
+        return Collections.unmodifiableList(expressions);
+    }
 
     /**
      * 记录遍历过程中发现的对象表达式。
@@ -79,16 +96,15 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(FileNode fileNode) {
+    public ObjectRecord visit(FileNode fileNode) {
         if (fileNode == null) {
             return null;
         }
-        visitNode(fileNode.getProgram());
-        return null;
+        return visitNode(fileNode.getProgram());
     }
 
     @Override
-    public Void visit(ImportDeclarationNode importDeclarationNode) {
+    public ObjectRecord visit(ImportDeclarationNode importDeclarationNode) {
         if (importDeclarationNode == null) {
             return null;
         }
@@ -101,7 +117,7 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(ExportDefaultDeclaration exportDefaultDeclaration) {
+    public ObjectRecord visit(ExportDefaultDeclaration exportDefaultDeclaration) {
         if (exportDefaultDeclaration == null) {
             return null;
         }
@@ -118,12 +134,12 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(Specifier specifier) {
+    public ObjectRecord visit(Specifier specifier) {
         return null;
     }
 
     @Override
-    public Void visit(ProgramNode programNode) {
+    public ObjectRecord visit(ProgramNode programNode) {
         if (programNode == null || programNode.getBody() == null) {
             return null;
         }
@@ -134,7 +150,7 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(VariableDeclarationNode variableDeclarationNode) {
+    public ObjectRecord visit(VariableDeclarationNode variableDeclarationNode) {
         if (variableDeclarationNode == null || variableDeclarationNode.getDeclarations() == null) {
             return null;
         }
@@ -156,21 +172,22 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(ObjectExpression objectExpression) {
+    public ObjectRecord visit(ObjectExpression objectExpression) {
         if (objectExpression == null || !visitedExpressions.add(objectExpression)) {
             return null;
         }
-        objectRecords.add(new ObjectRecord(currentPath(), objectExpression));
+        ObjectRecord record = new ObjectRecord(currentPath(), objectExpression);
+        objectRecords.add(record);
         if (objectExpression.getProperties() != null) {
             for (ObjectProperty property : objectExpression.getProperties()) {
                 visit(property);
             }
         }
-        return null;
+        return record;
     }
 
     @Override
-    public Void visit(ObjectProperty objectProperty) {
+    public ObjectRecord visit(ObjectProperty objectProperty) {
         if (objectProperty == null) {
             return null;
         }
@@ -186,12 +203,12 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(NumericLiteral numericLiteral) {
+    public ObjectRecord visit(NumericLiteral numericLiteral) {
         return null;
     }
 
     @Override
-    public Void visit(MemberExpression memberExpression) {
+    public ObjectRecord visit(MemberExpression memberExpression) {
         if (memberExpression == null) {
             return null;
         }
@@ -200,7 +217,7 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(ArrayExpression arrayExpression) {
+    public ObjectRecord visit(ArrayExpression arrayExpression) {
         if (arrayExpression == null || arrayExpression.getElements() == null) {
             return null;
         }
@@ -211,7 +228,7 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(CallExpression callExpression) {
+    public ObjectRecord visit(CallExpression callExpression) {
         if (callExpression == null) {
             return null;
         }
@@ -225,7 +242,7 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(ArrowFunctionExpression arrowFunctionExpression) {
+    public ObjectRecord visit(ArrowFunctionExpression arrowFunctionExpression) {
         if (arrowFunctionExpression == null) {
             return null;
         }
@@ -239,11 +256,11 @@ public class JSXObjectVisitor implements JSXNodeVisitor<Void> {
     }
 
     @Override
-    public Void visit(ImportExpression importExpression) {
+    public ObjectRecord visit(ImportExpression importExpression) {
         return null;
     }
 
-    private Void visitNode(Node node) {
+    private ObjectRecord visitNode(Node node) {
         if (node == null) {
             return null;
         }
