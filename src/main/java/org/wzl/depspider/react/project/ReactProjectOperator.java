@@ -157,6 +157,9 @@ public class ReactProjectOperator implements IReactProjectOperator {
      */
     private void setProjectIndexFile() {
         for (File file : Objects.requireNonNull(srcFileFolder.listFiles())) {
+            if (file.isDirectory()) {
+                continue;
+            }
             String regexp = "(createRoot\\s*\\(|root\\.render\\s*\\(|ReactDOM\\.render\\s*\\(|React\\.createElement\\s*\\(|hydrateRoot\\s*\\(|hydrate\\s*\\()\n";
             String fileContent;
             try {
@@ -350,6 +353,19 @@ public class ReactProjectOperator implements IReactProjectOperator {
             throw new ReactProjectValidException("路由配置文件不存在: " + relativeFilePath);
         }
 
+        if (routeFile.getName().endsWith(".js")) {
+            return doParseJSRouteDefines(routeFile);
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析以 .js 结尾的路由配置文件
+     * @param routeFile 路由文件
+     * @return          路由定义DTO
+     */
+    private List<PageRouterDefine> doParseJSRouteDefines(File routeFile) {
         JSXParse jsxParse = new JSXParse(routeFile.getAbsolutePath());
         FileNode fileNode = jsxParse.parse();
         if (fileNode == null || fileNode.getProgram() == null) {
@@ -449,6 +465,32 @@ public class ReactProjectOperator implements IReactProjectOperator {
             }
         }
         return bindings;
+    }
+
+    /**
+     * 判断是否引入了 import { lazy } from 'react';
+     * @param programNode   文件节点
+     * @return              是否引入了react的lazy组件
+     */
+    private boolean isImportLazy(ProgramNode programNode) {
+        List<Node> body = programNode.getBody();
+        for (Node node : body) {
+            if (node instanceof ImportDeclarationNode) {
+                ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
+                //from 'react'
+                boolean isImportReact = importDeclarationNode.getSource().getValue().equals("react");
+                //是否满足 import { lazy }
+                for (Specifier specifier : importDeclarationNode.getSpecifiers()) {
+                    if (isImportReact && specifier instanceof ImportSpecifier) {
+                        ImportSpecifier importSpecifier = (ImportSpecifier) specifier;
+                        if (importSpecifier.getImported().getName().equals("lazy")) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private List<PageRouterDefine> extractRouteDefinesFromDeclaration(Node declaration,
