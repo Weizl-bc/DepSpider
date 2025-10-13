@@ -157,6 +157,9 @@ public class ReactProjectOperator implements IReactProjectOperator {
      */
     private void setProjectIndexFile() {
         for (File file : Objects.requireNonNull(srcFileFolder.listFiles())) {
+            if (file.isDirectory()) {
+                continue;
+            }
             String regexp = "(createRoot\\s*\\(|root\\.render\\s*\\(|ReactDOM\\.render\\s*\\(|React\\.createElement\\s*\\(|hydrateRoot\\s*\\(|hydrate\\s*\\()\n";
             String fileContent;
             try {
