@@ -94,26 +94,3 @@ java -cp target/classes org.wzl.depspider.example.JSXObjectVisitorExample /path/
 ```
 
 示例程序会打印出文件中所有的对象表达式及其对应的路径，便于快速验证访问结果。
-
-#### 3、解析单个路由配置文件
-
-```java
-List<PageRouterDefine> routes = reactProjectOperator.parseRouteDefines("src/routes/bee.js");
-for (PageRouterDefine route : routes) {
-    System.out.println(route.getRoutePath() + " => " + route.getRelativeFilePath());
-}
-```
-
-如果 `bee.js` 中定义了类似下面的导出：
-
-```javascript
-export default [
-  {
-    path: '/gpsmap',
-    lazy: () => import('MicroSiteBee/gpsmap'),
-    title: '',
-  }
-];
-```
-
-则输出会包含 `"/gpsmap => src/MicroSiteBee/gpsmap/index.jsx"` 等信息，`relativeFilePath` 会自动适配 `.jsx`、`.tsx` 等常见后缀。
