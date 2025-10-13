@@ -14,6 +14,7 @@ import org.wzl.depspider.ast.jsx.parser.node.definition.CallExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Expression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Identifier;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ImportExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.MemberExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.Node;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectProperty;
@@ -586,17 +587,22 @@ public class ReactProjectOperator implements IReactProjectOperator {
             return null;
         }
         CallExpression callExpression = (CallExpression) node;
-        if (!(callExpression.getCallee() instanceof ImportExpression)) {
+        Node callee = callExpression.getCallee();
+        if (callee instanceof ImportExpression) {
+            List<Expression> arguments = callExpression.getArguments();
+            if (arguments == null || arguments.isEmpty()) {
+                return null;
+            }
+            Expression firstArgument = arguments.get(0);
+            if (firstArgument instanceof StringLiteral) {
+                String importPath = stripQuotes(((StringLiteral) firstArgument).getValue());
+                return resolveComponentFile(routeFile, importPath);
+            }
             return null;
         }
-        List<Expression> arguments = callExpression.getArguments();
-        if (arguments == null || arguments.isEmpty()) {
-            return null;
-        }
-        Expression firstArgument = arguments.get(0);
-        if (firstArgument instanceof StringLiteral) {
-            String importPath = stripQuotes(((StringLiteral) firstArgument).getValue());
-            return resolveComponentFile(routeFile, importPath);
+        if (callee instanceof MemberExpression) {
+            Expression object = ((MemberExpression) callee).getObject();
+            return resolveImportCall(object, routeFile);
         }
         return null;
     }
@@ -741,35 +747,89 @@ public class ReactProjectOperator implements IReactProjectOperator {
             return components;
         }
         for (Node node : programNode.getBody()) {
-            if (!(node instanceof ImportDeclarationNode)) {
-                continue;
-            }
-            ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
-            if (importDeclarationNode.getSpecifiers() == null || importDeclarationNode.getSpecifiers().isEmpty()) {
-                continue;
-            }
-            String importPath = importDeclarationNode.getSource() == null
-                    ? null
-                    : stripQuotes(importDeclarationNode.getSource().getValue());
-            if (importPath == null) {
-                continue;
-            }
-            File resolved = resolveComponentFile(routeFile, importPath);
-            for (Specifier specifier : importDeclarationNode.getSpecifiers()) {
-                if (!(specifier instanceof ImportSpecifier)) {
+            if (node instanceof ImportDeclarationNode) {
+                ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
+                if (importDeclarationNode.getSpecifiers() == null || importDeclarationNode.getSpecifiers().isEmpty()) {
                     continue;
                 }
-                ImportSpecifier importSpecifier = (ImportSpecifier) specifier;
-                Identifier local = importSpecifier.getLocal();
-                Identifier imported = importSpecifier.getImported();
-                String localName = local != null ? local.getName()
-                        : (imported != null ? imported.getName() : null);
-                if (localName != null && !localName.isEmpty()) {
-                    components.put(localName, resolved);
+                String importPath = importDeclarationNode.getSource() == null
+                        ? null
+                        : stripQuotes(importDeclarationNode.getSource().getValue());
+                if (importPath == null) {
+                    continue;
+                }
+                File resolved = resolveComponentFile(routeFile, importPath);
+                for (Specifier specifier : importDeclarationNode.getSpecifiers()) {
+                    if (!(specifier instanceof ImportSpecifier)) {
+                        continue;
+                    }
+                    ImportSpecifier importSpecifier = (ImportSpecifier) specifier;
+                    Identifier local = importSpecifier.getLocal();
+                    Identifier imported = importSpecifier.getImported();
+                    String localName = local != null ? local.getName()
+                            : (imported != null ? imported.getName() : null);
+                    if (localName != null && !localName.isEmpty()) {
+                        components.put(localName, resolved);
+                    }
+                }
+                continue;
+            }
+            if (node instanceof VariableDeclarationNode) {
+                VariableDeclarationNode declarationNode = (VariableDeclarationNode) node;
+                if (declarationNode.getDeclarations() == null) {
+                    continue;
+                }
+                for (VariableDeclarator declarator : declarationNode.getDeclarations()) {
+                    if (declarator == null || declarator.getId() == null) {
+                        continue;
+                    }
+                    File resolved = resolveVariableComponentFile(declarator.getInit(), routeFile, components);
+                    if (resolved != null) {
+                        components.put(declarator.getId().getName(), resolved);
+                    }
                 }
             }
         }
         return components;
+    }
+
+    private File resolveVariableComponentFile(Node init, File routeFile, Map<String, File> knownComponents) {
+        if (init == null) {
+            return null;
+        }
+        if (init instanceof Identifier) {
+            return knownComponents.get(((Identifier) init).getName());
+        }
+        if (init instanceof ArrowFunctionExpression) {
+            return resolveLazyComponentFile(init, routeFile);
+        }
+        if (init instanceof CallExpression) {
+            CallExpression callExpression = (CallExpression) init;
+            if (isLazyFactoryCall(callExpression)) {
+                List<Expression> arguments = callExpression.getArguments();
+                if (arguments != null && !arguments.isEmpty()) {
+                    return resolveLazyComponentFile(arguments.get(0), routeFile);
+                }
+                return null;
+            }
+            File resolved = resolveImportCall(callExpression, routeFile);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        return null;
+    }
+
+    private boolean isLazyFactoryCall(CallExpression callExpression) {
+        Node callee = callExpression.getCallee();
+        if (callee instanceof Identifier) {
+            return "lazy".equals(((Identifier) callee).getName());
+        }
+        if (callee instanceof MemberExpression) {
+            Identifier property = ((MemberExpression) callee).getProperty();
+            return property != null && "lazy".equals(property.getName());
+        }
+        return false;
     }
 
     private void collectDownwardRelations(File current, Map<File, ProjectFileRelation> targetMap,
