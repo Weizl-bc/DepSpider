@@ -35,7 +35,6 @@ import org.wzl.depspider.utils.FileUtil;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Stack;
 
 @Slf4j
 public class JSXParse {
@@ -181,10 +180,11 @@ public class JSXParse {
     private List<Node> getProgramBody() {
         List<Node> body = new ArrayList<>();
 
-        Stack<Token> stack = new Stack<>();
-        stack.push(nextToken());
-        while (!stack.isEmpty()) {
-            Token token = stack.pop();
+        while (true) {
+            Token token = nextToken();
+            if (token == null) {
+                break;
+            }
             TokenType type = token.getType();
             String value = token.getValue();
 
@@ -216,8 +216,6 @@ public class JSXParse {
                 //变量/普通标识符
 
             }
-
-            stack.push(nextToken());
         }
         return body;
     }
