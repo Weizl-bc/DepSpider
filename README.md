@@ -66,3 +66,54 @@ List<ProjectFileRelation> relations = reactProjectOperator.jsxFileRelation();
   }
 ]
 ```
+
+#### 2、使用 `JSXObjectVisitor` 获取文件中的对象表达式
+
+`JSXObjectVisitor` 可以帮助你遍历单个 JSX/TSX 文件并收集其中出现的 `ObjectExpression` 节点，便于后续进行分析或转换。最简单的使用方式如下：
+
+```java
+String indexPath = "/path/to/your/file.jsx";
+JSXParse jsxParse = new JSXParse(indexPath);
+FileNode fileNode = jsxParse.parse();
+
+JSXObjectVisitor visitor = new JSXObjectVisitor();
+visitor.visit(fileNode);
+
+// 输出采集到的对象表达式及其上下文路径
+// ObjectRecord 位于 org.wzl.depspider.ast.jsx.visitor 包中
+for (ObjectRecord record : visitor.getObjectRecords()) {
+    System.out.println(record.getPath() + " => " + record.getExpression());
+}
+```
+
+如果你想直接运行一个示例，可以执行仓库中的 `JSXObjectVisitorExample`：
+
+```bash
+mvn -DskipTests=true -q compile
+java -cp target/classes org.wzl.depspider.example.JSXObjectVisitorExample /path/to/your/file.jsx
+```
+
+示例程序会打印出文件中所有的对象表达式及其对应的路径，便于快速验证访问结果。
+
+#### 3、解析单个路由配置文件
+
+```java
+List<PageRouterDefine> routes = reactProjectOperator.parseRouteDefines("src/routes/bee.js");
+for (PageRouterDefine route : routes) {
+    System.out.println(route.getRoutePath() + " => " + route.getRelativeFilePath());
+}
+```
+
+如果 `bee.js` 中定义了类似下面的导出：
+
+```javascript
+export default [
+  {
+    path: '/gpsmap',
+    lazy: () => import('MicroSiteBee/gpsmap'),
+    title: '',
+  }
+];
+```
+
+则输出会包含 `"/gpsmap => src/MicroSiteBee/gpsmap/index.jsx"` 等信息，`relativeFilePath` 会自动适配 `.jsx`、`.tsx` 等常见后缀。

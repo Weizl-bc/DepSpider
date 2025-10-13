@@ -23,6 +23,11 @@ public class PageRouterDefine {
     private File componentFile;
 
     /**
+     * 组件文件的相对路径（相对项目根目录）
+     */
+    private String relativeFilePath;
+
+    /**
      * 一般是路由的名称，如果没有定义，则为空
      */
     private String title;
