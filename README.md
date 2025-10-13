@@ -9,7 +9,7 @@ This framework is built with Java and is designed to scan and analyze page-level
 <dependency>
     <groupId>io.github.1807149205</groupId>
     <artifactId>depspider</artifactId>
-    <version>0.0.9</version>
+    <version>0.0.10</version>
 </dependency>
 ```
 
