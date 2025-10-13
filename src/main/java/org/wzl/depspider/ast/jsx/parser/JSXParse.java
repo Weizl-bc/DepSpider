@@ -828,6 +828,14 @@ public class JSXParse {
                 lastToken = token;
                 break;
             }
+            if (token.getType().equals(JSXToken.Type.KEYWORD)
+                    && VARIABLE_KEY_WORD.contains(token.getValue())) {
+                unreadToken();
+                break;
+            }
+            if (token.getType().equals(JSXToken.Type.COMMENT)) {
+                continue;
+            }
             if (token.getType().equals(JSXToken.Type.COMMA)) {
                 continue;
             }
