@@ -1,6 +1,8 @@
-package org.wzl.depspider.ast.jsx.parser.node;
+package org.wzl.depspider.ast.jsx.visitor;
 
 import org.wzl.depspider.ast.core.node.ASTVisitor;
+import org.wzl.depspider.ast.jsx.parser.node.FileNode;
+import org.wzl.depspider.ast.jsx.parser.node.ProgramNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrowFunctionExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrayExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.CallExpression;

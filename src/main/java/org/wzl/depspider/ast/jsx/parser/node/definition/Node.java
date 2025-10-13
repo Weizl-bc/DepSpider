@@ -1,7 +1,7 @@
 package org.wzl.depspider.ast.jsx.parser.node.definition;
 
 import lombok.Data;
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
+import org.wzl.depspider.ast.jsx.visitor.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.NodeType;
 
 @Data

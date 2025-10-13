@@ -1,8 +1,7 @@
-package org.wzl.depspider.ast.jsx.parser;
+package org.wzl.depspider.ast.jsx.visitor;
 
 import lombok.Getter;
 import org.wzl.depspider.ast.jsx.parser.node.FileNode;
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.ProgramNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrayExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrowFunctionExpression;
@@ -17,7 +16,6 @@ import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ExportDefaul
 import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ImportDeclarationNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.VariableDeclarationNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.literal.NumericLiteral;
-import org.wzl.depspider.ast.jsx.parser.node.definition.literal.StringLiteral;
 import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.ImportSpecifier;
 import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.Specifier;
 

@@ -1,8 +1,7 @@
-package org.wzl.depspider.ast.jsx.parser;
+package org.wzl.depspider.ast.jsx.visitor;
 
 import lombok.extern.slf4j.Slf4j;
 import org.wzl.depspider.ast.jsx.parser.node.FileNode;
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.ProgramNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrayExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ArrowFunctionExpression;

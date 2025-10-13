@@ -1,6 +1,6 @@
 package org.wzl.depspider.ast.jsx.parser.node.definition;
 
-import org.wzl.depspider.ast.jsx.parser.node.JSXNodeVisitor;
+import org.wzl.depspider.ast.jsx.visitor.JSXNodeVisitor;
 import org.wzl.depspider.ast.jsx.parser.node.NodeType;
 
 public class ExpressionStatement extends Statement {
