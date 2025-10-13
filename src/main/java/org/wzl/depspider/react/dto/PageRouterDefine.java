@@ -32,4 +32,9 @@ public class PageRouterDefine {
      */
     private String title;
 
+    /**
+     * 路由对应的组件文件是否真实存在
+     */
+    private boolean componentFileExists;
+
 }

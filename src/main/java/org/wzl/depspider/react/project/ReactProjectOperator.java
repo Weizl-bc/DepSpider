@@ -18,9 +18,12 @@ import org.wzl.depspider.ast.jsx.parser.node.definition.Node;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectExpression;
 import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectProperty;
 import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ExportDefaultDeclaration;
+import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ImportDeclarationNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.VariableDeclarationNode;
 import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.VariableDeclarator;
 import org.wzl.depspider.ast.jsx.parser.node.definition.literal.StringLiteral;
+import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.ImportSpecifier;
+import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.Specifier;
 import org.wzl.depspider.react.dto.FileImport;
 import org.wzl.depspider.react.dto.FileImportDetail;
 import org.wzl.depspider.react.dto.FileRelationDetail;
@@ -341,12 +344,13 @@ public class ReactProjectOperator implements IReactProjectOperator {
 
         ProgramNode programNode = fileNode.getProgram();
         Map<String, Node> bindings = collectTopLevelBindings(programNode);
+        Map<String, File> importComponentMap = collectImportComponentMap(programNode, routeFile);
         List<PageRouterDefine> defines = new ArrayList<>();
 
         for (Node node : programNode.getBody()) {
             if (node instanceof ExportDefaultDeclaration) {
                 Node declaration = ((ExportDefaultDeclaration) node).getDeclaration();
-                defines.addAll(extractRouteDefinesFromDeclaration(declaration, bindings, routeFile));
+                defines.addAll(extractRouteDefinesFromDeclaration(declaration, bindings, importComponentMap, routeFile));
             }
         }
 
@@ -429,26 +433,28 @@ public class ReactProjectOperator implements IReactProjectOperator {
 
     private List<PageRouterDefine> extractRouteDefinesFromDeclaration(Node declaration,
                                                                       Map<String, Node> bindings,
+                                                                      Map<String, File> importComponentMap,
                                                                       File routeFile) {
         List<PageRouterDefine> result = new ArrayList<>();
         if (declaration == null) {
             return result;
         }
         if (declaration instanceof ArrayExpression) {
-            result.addAll(extractRouteDefinesFromArray((ArrayExpression) declaration, routeFile));
+            result.addAll(extractRouteDefinesFromArray((ArrayExpression) declaration, importComponentMap, routeFile));
             return result;
         }
         if (declaration instanceof Identifier) {
             Identifier identifier = (Identifier) declaration;
             Node resolved = bindings.get(identifier.getName());
             if (resolved != null && resolved != declaration) {
-                result.addAll(extractRouteDefinesFromDeclaration(resolved, bindings, routeFile));
+                result.addAll(extractRouteDefinesFromDeclaration(resolved, bindings, importComponentMap, routeFile));
             }
         }
         return result;
     }
 
     private List<PageRouterDefine> extractRouteDefinesFromArray(ArrayExpression arrayExpression,
+                                                                Map<String, File> importComponentMap,
                                                                 File routeFile) {
         List<PageRouterDefine> defines = new ArrayList<>();
         if (arrayExpression == null || arrayExpression.getElements() == null) {
@@ -456,7 +462,7 @@ public class ReactProjectOperator implements IReactProjectOperator {
         }
         for (Expression element : arrayExpression.getElements()) {
             if (element instanceof ObjectExpression) {
-                PageRouterDefine define = buildRouteDefinition((ObjectExpression) element, routeFile);
+                PageRouterDefine define = buildRouteDefinition((ObjectExpression) element, importComponentMap, routeFile);
                 if (define != null) {
                     defines.add(define);
                 }
@@ -465,7 +471,9 @@ public class ReactProjectOperator implements IReactProjectOperator {
         return defines;
     }
 
-    private PageRouterDefine buildRouteDefinition(ObjectExpression objectExpression, File routeFile) {
+    private PageRouterDefine buildRouteDefinition(ObjectExpression objectExpression,
+                                                  Map<String, File> importComponentMap,
+                                                  File routeFile) {
         if (objectExpression == null || objectExpression.getProperties() == null) {
             return null;
         }
@@ -493,6 +501,11 @@ public class ReactProjectOperator implements IReactProjectOperator {
                 case "lazy":
                     componentFile = resolveLazyComponentFile(value, routeFile);
                     break;
+                case "component":
+                    if (componentFile == null) {
+                        componentFile = resolveComponentIdentifier(value, importComponentMap);
+                    }
+                    break;
                 default:
                     break;
             }
@@ -507,7 +520,16 @@ public class ReactProjectOperator implements IReactProjectOperator {
         define.setTitle(title != null ? title : "");
         define.setComponentFile(componentFile);
         define.setRelativeFilePath(componentFile != null ? projectRelativePath(componentFile) : null);
+        define.setComponentFileExists(componentFile != null && componentFile.exists());
         return define;
+    }
+
+    private File resolveComponentIdentifier(Node node, Map<String, File> importComponentMap) {
+        if (!(node instanceof Identifier) || importComponentMap == null || importComponentMap.isEmpty()) {
+            return null;
+        }
+        Identifier identifier = (Identifier) node;
+        return importComponentMap.get(identifier.getName());
     }
 
     private String resolvePropertyName(ObjectProperty property) {
@@ -590,6 +612,18 @@ public class ReactProjectOperator implements IReactProjectOperator {
             base = parent == null ? new File(importPath) : new File(parent, importPath);
         } else if (importPath.startsWith("/")) {
             base = new File(projectFileFolder, importPath.substring(1));
+        } else if (importPath.startsWith("src/")) {
+            base = new File(projectFileFolder, importPath);
+        } else if (importPath.startsWith("@/")) {
+            base = new File(srcFileFolder, importPath.substring(2));
+        } else if (importPath.startsWith("$src/")) {
+            base = new File(srcFileFolder, importPath.substring(5));
+        } else if (importPath.startsWith("@")) {
+            String trimmed = importPath.substring(1);
+            if (trimmed.startsWith("/")) {
+                trimmed = trimmed.substring(1);
+            }
+            base = new File(srcFileFolder, trimmed);
         } else {
             base = new File(srcFileFolder, importPath);
         }
@@ -699,6 +733,43 @@ public class ReactProjectOperator implements IReactProjectOperator {
             // ignore and fall back to direct relative path expression
         }
         return target.toString().replace(File.separatorChar, '/');
+    }
+
+    private Map<String, File> collectImportComponentMap(ProgramNode programNode, File routeFile) {
+        Map<String, File> components = new HashMap<>();
+        if (programNode == null || programNode.getBody() == null) {
+            return components;
+        }
+        for (Node node : programNode.getBody()) {
+            if (!(node instanceof ImportDeclarationNode)) {
+                continue;
+            }
+            ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
+            if (importDeclarationNode.getSpecifiers() == null || importDeclarationNode.getSpecifiers().isEmpty()) {
+                continue;
+            }
+            String importPath = importDeclarationNode.getSource() == null
+                    ? null
+                    : stripQuotes(importDeclarationNode.getSource().getValue());
+            if (importPath == null) {
+                continue;
+            }
+            File resolved = resolveComponentFile(routeFile, importPath);
+            for (Specifier specifier : importDeclarationNode.getSpecifiers()) {
+                if (!(specifier instanceof ImportSpecifier)) {
+                    continue;
+                }
+                ImportSpecifier importSpecifier = (ImportSpecifier) specifier;
+                Identifier local = importSpecifier.getLocal();
+                Identifier imported = importSpecifier.getImported();
+                String localName = local != null ? local.getName()
+                        : (imported != null ? imported.getName() : null);
+                if (localName != null && !localName.isEmpty()) {
+                    components.put(localName, resolved);
+                }
+            }
+        }
+        return components;
     }
 
     private void collectDownwardRelations(File current, Map<File, ProjectFileRelation> targetMap,

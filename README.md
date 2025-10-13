@@ -94,3 +94,44 @@ java -cp target/classes org.wzl.depspider.example.JSXObjectVisitorExample /path/
 ```
 
 示例程序会打印出文件中所有的对象表达式及其对应的路径，便于快速验证访问结果。
+
+#### 3、解析单个路由配置文件
+
+```java
+List<PageRouterDefine> routes = reactProjectOperator.parseRouteDefines("src/routes/bee.js");
+for (PageRouterDefine route : routes) {
+    System.out.println(route.getRoutePath()
+            + " => " + route.getRelativeFilePath()
+            + " (exists: " + route.isComponentFileExists() + ")");
+}
+```
+
+如果 `bee.js` 中定义了类似下面的导出：
+
+```javascript
+export default [
+  {
+    path: '/gpsmap',
+    lazy: () => import('MicroSiteBee/gpsmap'),
+    title: '',
+  }
+];
+```
+
+则输出会包含 `"/gpsmap => src/MicroSiteBee/gpsmap/index.jsx"` 等信息，`relativeFilePath` 会自动适配 `.jsx`、`.tsx` 等常见后缀；当组件文件不存在时，`isComponentFileExists()` 将返回 `false`，便于快速识别异常路由。
+
+对于通过 `component` 属性直接引用已导入组件的写法，同样能够解析出对应的组件文件，例如：
+
+```javascript
+import AppTabbar from '@/pages/app-tabbar';
+
+export default [
+  {
+    path: '/apphome',
+    component: AppTabbar,
+    title: '网点管家首页',
+  },
+];
+```
+
+这类路由会生成 `"/apphome => src/pages/app-tabbar/index.jsx"` 之类的结果。路径中像 `@/`、`$src/` 的常见别名也会自动映射到 `src` 目录，便于兼容不同项目的路径风格。
