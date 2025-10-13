@@ -75,6 +75,12 @@ public class JSXParse {
         return token;
     }
 
+    private void unreadToken() {
+        if (tokenIndex > 0) {
+            tokenIndex--;
+        }
+    }
+
     /**
      * 获取下一个token，index不变
      * @return  Token
@@ -233,6 +239,19 @@ public class JSXParse {
                 break;
             }
             if (!identifierToken.getType().equals(JSXToken.Type.IDENTIFIER)) {
+                if (identifierToken.getType().equals(JSXToken.Type.KEYWORD)
+                        && VARIABLE_KEY_WORD.contains(identifierToken.getValue())) {
+                    unreadToken();
+                    break;
+                }
+                if (identifierToken.getType().equals(JSXToken.Type.RIGHT_BRACE)
+                        || identifierToken.getType().equals(JSXToken.Type.RIGHT_PARENTHESIS)) {
+                    unreadToken();
+                    break;
+                }
+                if (identifierToken.getType().equals(JSXToken.Type.COMMENT)) {
+                    break;
+                }
                 lastToken = identifierToken;
                 if (identifierToken.getType().equals(JSXToken.Type.EOF)) {
                     break;
