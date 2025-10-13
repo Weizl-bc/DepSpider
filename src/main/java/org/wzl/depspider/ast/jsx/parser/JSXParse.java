@@ -282,6 +282,11 @@ public class JSXParse {
             break;
         }
 
+        Token possibleTerminator = peekToken();
+        if (isStatementTerminator(possibleTerminator)) {
+            lastToken = nextToken();
+        }
+
         Position endPos = new Position(lastToken.getLine(), lastToken.getColumn(), lastToken.getEndIndex());
         VariableDeclarationNode node = new VariableDeclarationNode(
                 declarationStart,
@@ -301,6 +306,13 @@ public class JSXParse {
             return new ParsedNode(getNumericLiteral(initToken), initToken);
         }
         if (tokenType.equals(JSXToken.Type.IDENTIFIER)) {
+            Token potentialParen = peekToken();
+            if (potentialParen != null && potentialParen.getType().equals(JSXToken.Type.LEFT_PARENTHESIS)) {
+                ParsedNode callExpression = parseCallExpression(initToken);
+                if (callExpression != null) {
+                    return callExpression;
+                }
+            }
             if (isArrowFunctionWithSingleParam()) {
                 ParsedNode arrowFunction = parseArrowFunctionWithSingleParam(initToken);
                 if (arrowFunction != null) {
