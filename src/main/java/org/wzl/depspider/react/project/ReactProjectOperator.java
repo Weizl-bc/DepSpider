@@ -7,6 +7,23 @@ import lombok.extern.slf4j.Slf4j;
 import org.wzl.depspider.ast.jsx.visitor.JSXImportVisitor;
 import org.wzl.depspider.ast.jsx.parser.JSXParse;
 import org.wzl.depspider.ast.jsx.parser.node.FileNode;
+import org.wzl.depspider.ast.jsx.parser.node.ProgramNode;
+import org.wzl.depspider.ast.jsx.parser.node.definition.ArrayExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.ArrowFunctionExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.CallExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.Expression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.Identifier;
+import org.wzl.depspider.ast.jsx.parser.node.definition.ImportExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.Node;
+import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectExpression;
+import org.wzl.depspider.ast.jsx.parser.node.definition.ObjectProperty;
+import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ExportDefaultDeclaration;
+import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.ImportDeclarationNode;
+import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.VariableDeclarationNode;
+import org.wzl.depspider.ast.jsx.parser.node.definition.declaration.VariableDeclarator;
+import org.wzl.depspider.ast.jsx.parser.node.definition.literal.StringLiteral;
+import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.ImportSpecifier;
+import org.wzl.depspider.ast.jsx.parser.node.definition.specifier.Specifier;
 import org.wzl.depspider.react.dto.FileImport;
 import org.wzl.depspider.react.dto.FileImportDetail;
 import org.wzl.depspider.react.dto.FileRelationDetail;
@@ -26,9 +43,11 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -306,6 +325,38 @@ public class ReactProjectOperator implements IReactProjectOperator {
         return null;
     }
 
+    @Override
+    public List<PageRouterDefine> parseRouteDefines(String relativeFilePath) {
+        if (relativeFilePath == null || relativeFilePath.trim().isEmpty()) {
+            throw new ReactProjectValidException("路由配置文件路径不能为空");
+        }
+
+        File routeFile = new File(projectFileFolder, relativeFilePath);
+        if (!routeFile.exists() || !routeFile.isFile()) {
+            throw new ReactProjectValidException("路由配置文件不存在: " + relativeFilePath);
+        }
+
+        JSXParse jsxParse = new JSXParse(routeFile.getAbsolutePath());
+        FileNode fileNode = jsxParse.parse();
+        if (fileNode == null || fileNode.getProgram() == null) {
+            return new ArrayList<>();
+        }
+
+        ProgramNode programNode = fileNode.getProgram();
+        Map<String, Node> bindings = collectTopLevelBindings(programNode);
+        Map<String, File> importComponentMap = collectImportComponentMap(programNode, routeFile);
+        List<PageRouterDefine> defines = new ArrayList<>();
+
+        for (Node node : programNode.getBody()) {
+            if (node instanceof ExportDefaultDeclaration) {
+                Node declaration = ((ExportDefaultDeclaration) node).getDeclaration();
+                defines.addAll(extractRouteDefinesFromDeclaration(declaration, bindings, importComponentMap, routeFile));
+            }
+        }
+
+        return defines;
+    }
+
     /**
      * 校验项目中是否引入了react-router
      * @author 卫志龙
@@ -352,6 +403,373 @@ public class ReactProjectOperator implements IReactProjectOperator {
                 }
             }
         }
+    }
+
+    private Map<String, Node> collectTopLevelBindings(ProgramNode programNode) {
+        Map<String, Node> bindings = new HashMap<>();
+        if (programNode == null || programNode.getBody() == null) {
+            return bindings;
+        }
+        for (Node node : programNode.getBody()) {
+            if (node instanceof VariableDeclarationNode) {
+                VariableDeclarationNode declarationNode = (VariableDeclarationNode) node;
+                if (declarationNode.getDeclarations() == null) {
+                    continue;
+                }
+                for (VariableDeclarator declarator : declarationNode.getDeclarations()) {
+                    if (declarator == null) {
+                        continue;
+                    }
+                    Identifier identifier = declarator.getId();
+                    Node init = declarator.getInit();
+                    if (identifier != null && init != null) {
+                        bindings.put(identifier.getName(), init);
+                    }
+                }
+            }
+        }
+        return bindings;
+    }
+
+    private List<PageRouterDefine> extractRouteDefinesFromDeclaration(Node declaration,
+                                                                      Map<String, Node> bindings,
+                                                                      Map<String, File> importComponentMap,
+                                                                      File routeFile) {
+        List<PageRouterDefine> result = new ArrayList<>();
+        if (declaration == null) {
+            return result;
+        }
+        if (declaration instanceof ArrayExpression) {
+            result.addAll(extractRouteDefinesFromArray((ArrayExpression) declaration, importComponentMap, routeFile));
+            return result;
+        }
+        if (declaration instanceof Identifier) {
+            Identifier identifier = (Identifier) declaration;
+            Node resolved = bindings.get(identifier.getName());
+            if (resolved != null && resolved != declaration) {
+                result.addAll(extractRouteDefinesFromDeclaration(resolved, bindings, importComponentMap, routeFile));
+            }
+        }
+        return result;
+    }
+
+    private List<PageRouterDefine> extractRouteDefinesFromArray(ArrayExpression arrayExpression,
+                                                                Map<String, File> importComponentMap,
+                                                                File routeFile) {
+        List<PageRouterDefine> defines = new ArrayList<>();
+        if (arrayExpression == null || arrayExpression.getElements() == null) {
+            return defines;
+        }
+        for (Expression element : arrayExpression.getElements()) {
+            if (element instanceof ObjectExpression) {
+                PageRouterDefine define = buildRouteDefinition((ObjectExpression) element, importComponentMap, routeFile);
+                if (define != null) {
+                    defines.add(define);
+                }
+            }
+        }
+        return defines;
+    }
+
+    private PageRouterDefine buildRouteDefinition(ObjectExpression objectExpression,
+                                                  Map<String, File> importComponentMap,
+                                                  File routeFile) {
+        if (objectExpression == null || objectExpression.getProperties() == null) {
+            return null;
+        }
+
+        String path = null;
+        String title = null;
+        File componentFile = null;
+
+        for (ObjectProperty property : objectExpression.getProperties()) {
+            if (property == null) {
+                continue;
+            }
+            String propertyName = resolvePropertyName(property);
+            if (propertyName == null) {
+                continue;
+            }
+            Node value = property.getValue();
+            switch (propertyName) {
+                case "path":
+                    path = stringLiteralValue(value);
+                    break;
+                case "title":
+                    title = stringLiteralValue(value);
+                    break;
+                case "lazy":
+                    componentFile = resolveLazyComponentFile(value, routeFile);
+                    break;
+                case "component":
+                    if (componentFile == null) {
+                        componentFile = resolveComponentIdentifier(value, importComponentMap);
+                    }
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (path == null) {
+            return null;
+        }
+
+        PageRouterDefine define = new PageRouterDefine();
+        define.setRoutePath(path);
+        define.setTitle(title != null ? title : "");
+        define.setComponentFile(componentFile);
+        define.setRelativeFilePath(componentFile != null ? projectRelativePath(componentFile) : null);
+        define.setComponentFileExists(componentFile != null && componentFile.exists());
+        return define;
+    }
+
+    private File resolveComponentIdentifier(Node node, Map<String, File> importComponentMap) {
+        if (!(node instanceof Identifier) || importComponentMap == null || importComponentMap.isEmpty()) {
+            return null;
+        }
+        Identifier identifier = (Identifier) node;
+        return importComponentMap.get(identifier.getName());
+    }
+
+    private String resolvePropertyName(ObjectProperty property) {
+        if (property.isComputed()) {
+            return null;
+        }
+        Node key = property.getKey();
+        if (key instanceof Identifier) {
+            return ((Identifier) key).getName();
+        }
+        if (key instanceof StringLiteral) {
+            return stripQuotes(((StringLiteral) key).getValue());
+        }
+        return null;
+    }
+
+    private String stringLiteralValue(Node node) {
+        if (node instanceof StringLiteral) {
+            return stripQuotes(((StringLiteral) node).getValue());
+        }
+        return null;
+    }
+
+    private String stripQuotes(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.length() >= 2) {
+            char first = trimmed.charAt(0);
+            char last = trimmed.charAt(trimmed.length() - 1);
+            if ((first == '\'' && last == '\'')
+                    || (first == '"' && last == '"')
+                    || (first == '`' && last == '`')) {
+                return trimmed.substring(1, trimmed.length() - 1);
+            }
+        }
+        return trimmed;
+    }
+
+    private File resolveLazyComponentFile(Node node, File routeFile) {
+        if (node instanceof ArrowFunctionExpression) {
+            Node body = ((ArrowFunctionExpression) node).getBody();
+            File resolved = resolveImportCall(body, routeFile);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+        return resolveImportCall(node, routeFile);
+    }
+
+    private File resolveImportCall(Node node, File routeFile) {
+        if (!(node instanceof CallExpression)) {
+            return null;
+        }
+        CallExpression callExpression = (CallExpression) node;
+        if (!(callExpression.getCallee() instanceof ImportExpression)) {
+            return null;
+        }
+        List<Expression> arguments = callExpression.getArguments();
+        if (arguments == null || arguments.isEmpty()) {
+            return null;
+        }
+        Expression firstArgument = arguments.get(0);
+        if (firstArgument instanceof StringLiteral) {
+            String importPath = stripQuotes(((StringLiteral) firstArgument).getValue());
+            return resolveComponentFile(routeFile, importPath);
+        }
+        return null;
+    }
+
+    private File resolveComponentFile(File routeFile, String importPath) {
+        if (importPath == null || importPath.isEmpty()) {
+            return null;
+        }
+
+        File base;
+        if (importPath.startsWith("./") || importPath.startsWith("../")) {
+            File parent = routeFile.getParentFile();
+            base = parent == null ? new File(importPath) : new File(parent, importPath);
+        } else if (importPath.startsWith("/")) {
+            base = new File(projectFileFolder, importPath.substring(1));
+        } else if (importPath.startsWith("src/")) {
+            base = new File(projectFileFolder, importPath);
+        } else if (importPath.startsWith("@/")) {
+            base = new File(srcFileFolder, importPath.substring(2));
+        } else if (importPath.startsWith("$src/")) {
+            base = new File(srcFileFolder, importPath.substring(5));
+        } else if (importPath.startsWith("@")) {
+            String trimmed = importPath.substring(1);
+            if (trimmed.startsWith("/")) {
+                trimmed = trimmed.substring(1);
+            }
+            base = new File(srcFileFolder, trimmed);
+        } else {
+            base = new File(srcFileFolder, importPath);
+        }
+
+        base = base.getAbsoluteFile();
+        List<String> extensions = candidateExtensions();
+        File resolved = resolveExistingComponent(base, extensions);
+        if (resolved != null) {
+            return resolved;
+        }
+
+        if (hasKnownExtension(importPath, extensions)) {
+            return base;
+        }
+
+        File parent = base.getParentFile();
+        if (parent != null) {
+            for (String extension : extensions) {
+                File withExtension = new File(parent, base.getName() + extension);
+                resolved = resolveExistingComponent(withExtension, extensions);
+                if (resolved != null) {
+                    return resolved;
+                }
+            }
+        }
+
+        for (String extension : extensions) {
+            File indexCandidate = new File(base, "index" + extension);
+            resolved = resolveExistingComponent(indexCandidate, extensions);
+            if (resolved != null) {
+                return resolved;
+            }
+        }
+
+        if (!extensions.isEmpty()) {
+            return new File(base, "index" + extensions.get(0));
+        }
+
+        return base;
+    }
+
+    private File resolveExistingComponent(File candidate, List<String> extensions) {
+        if (candidate.exists()) {
+            if (candidate.isFile()) {
+                return candidate;
+            }
+            if (candidate.isDirectory()) {
+                File index = resolveIndexFile(candidate, extensions);
+                if (index != null) {
+                    return index;
+                }
+            }
+        }
+        return null;
+    }
+
+    private File resolveIndexFile(File directory, List<String> extensions) {
+        for (String extension : extensions) {
+            File index = new File(directory, "index" + extension);
+            if (index.exists()) {
+                return index;
+            }
+        }
+        return null;
+    }
+
+    private boolean hasKnownExtension(String importPath, List<String> extensions) {
+        for (String extension : extensions) {
+            if (importPath.endsWith(extension)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> candidateExtensions() {
+        LinkedHashSet<String> extensions = new LinkedHashSet<>();
+        Set<Language> languages = projectConfiguration.getLanguages();
+        if (languages.contains(Language.TS)) {
+            extensions.add(".tsx");
+            extensions.add(".ts");
+        }
+        if (languages.contains(Language.JS)) {
+            extensions.add(".jsx");
+            extensions.add(".js");
+        }
+        extensions.add(".mjs");
+        extensions.add(".cjs");
+        return new ArrayList<>(extensions);
+    }
+
+    private String projectRelativePath(File file) {
+        if (file == null) {
+            return null;
+        }
+        Path projectRoot = projectFileFolder.toPath();
+        Path target = file.toPath();
+        try {
+            if (file.exists()) {
+                projectRoot = projectRoot.toRealPath();
+                target = target.toRealPath();
+            }
+            if (target.startsWith(projectRoot)) {
+                return projectRoot.relativize(target).toString().replace(File.separatorChar, '/');
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            // ignore and fall back to direct relative path expression
+        }
+        return target.toString().replace(File.separatorChar, '/');
+    }
+
+    private Map<String, File> collectImportComponentMap(ProgramNode programNode, File routeFile) {
+        Map<String, File> components = new HashMap<>();
+        if (programNode == null || programNode.getBody() == null) {
+            return components;
+        }
+        for (Node node : programNode.getBody()) {
+            if (!(node instanceof ImportDeclarationNode)) {
+                continue;
+            }
+            ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
+            if (importDeclarationNode.getSpecifiers() == null || importDeclarationNode.getSpecifiers().isEmpty()) {
+                continue;
+            }
+            String importPath = importDeclarationNode.getSource() == null
+                    ? null
+                    : stripQuotes(importDeclarationNode.getSource().getValue());
+            if (importPath == null) {
+                continue;
+            }
+            File resolved = resolveComponentFile(routeFile, importPath);
+            for (Specifier specifier : importDeclarationNode.getSpecifiers()) {
+                if (!(specifier instanceof ImportSpecifier)) {
+                    continue;
+                }
+                ImportSpecifier importSpecifier = (ImportSpecifier) specifier;
+                Identifier local = importSpecifier.getLocal();
+                Identifier imported = importSpecifier.getImported();
+                String localName = local != null ? local.getName()
+                        : (imported != null ? imported.getName() : null);
+                if (localName != null && !localName.isEmpty()) {
+                    components.put(localName, resolved);
+                }
+            }
+        }
+        return components;
     }
 
     private void collectDownwardRelations(File current, Map<File, ProjectFileRelation> targetMap,

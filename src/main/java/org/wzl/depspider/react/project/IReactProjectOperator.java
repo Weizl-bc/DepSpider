@@ -52,4 +52,11 @@ public interface IReactProjectOperator {
      * @return 页面路由定义列表
      */
     List<PageRouterDefine> findPageRouterDefine();
+
+    /**
+     * 解析指定路由配置文件中的页面路由定义
+     * @param relativeFilePath 相对项目根目录的路由配置文件路径（例如 src/routes/bee.js）
+     * @return 该文件中声明的页面路由信息
+     */
+    List<PageRouterDefine> parseRouteDefines(String relativeFilePath);
 }
