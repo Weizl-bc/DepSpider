@@ -35,7 +35,6 @@ import org.wzl.depspider.utils.FileUtil;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Stack;
 
 @Slf4j
 public class JSXParse {
@@ -74,6 +73,12 @@ public class JSXParse {
         Token token = tokens.get(tokenIndex);
         tokenIndex++;
         return token;
+    }
+
+    private void unreadToken() {
+        if (tokenIndex > 0) {
+            tokenIndex--;
+        }
     }
 
     /**
@@ -181,10 +186,11 @@ public class JSXParse {
     private List<Node> getProgramBody() {
         List<Node> body = new ArrayList<>();
 
-        Stack<Token> stack = new Stack<>();
-        stack.push(nextToken());
-        while (!stack.isEmpty()) {
-            Token token = stack.pop();
+        while (true) {
+            Token token = nextToken();
+            if (token == null) {
+                break;
+            }
             TokenType type = token.getType();
             String value = token.getValue();
 
@@ -216,8 +222,6 @@ public class JSXParse {
                 //变量/普通标识符
 
             }
-
-            stack.push(nextToken());
         }
         return body;
     }
@@ -235,6 +239,19 @@ public class JSXParse {
                 break;
             }
             if (!identifierToken.getType().equals(JSXToken.Type.IDENTIFIER)) {
+                if (identifierToken.getType().equals(JSXToken.Type.KEYWORD)
+                        && VARIABLE_KEY_WORD.contains(identifierToken.getValue())) {
+                    unreadToken();
+                    break;
+                }
+                if (identifierToken.getType().equals(JSXToken.Type.RIGHT_BRACE)
+                        || identifierToken.getType().equals(JSXToken.Type.RIGHT_PARENTHESIS)) {
+                    unreadToken();
+                    break;
+                }
+                if (identifierToken.getType().equals(JSXToken.Type.COMMENT)) {
+                    break;
+                }
                 lastToken = identifierToken;
                 if (identifierToken.getType().equals(JSXToken.Type.EOF)) {
                     break;
@@ -282,6 +299,11 @@ public class JSXParse {
             break;
         }
 
+        Token possibleTerminator = peekToken();
+        if (isStatementTerminator(possibleTerminator)) {
+            lastToken = nextToken();
+        }
+
         Position endPos = new Position(lastToken.getLine(), lastToken.getColumn(), lastToken.getEndIndex());
         VariableDeclarationNode node = new VariableDeclarationNode(
                 declarationStart,
@@ -301,6 +323,13 @@ public class JSXParse {
             return new ParsedNode(getNumericLiteral(initToken), initToken);
         }
         if (tokenType.equals(JSXToken.Type.IDENTIFIER)) {
+            Token potentialParen = peekToken();
+            if (potentialParen != null && potentialParen.getType().equals(JSXToken.Type.LEFT_PARENTHESIS)) {
+                ParsedNode callExpression = parseCallExpression(initToken);
+                if (callExpression != null) {
+                    return callExpression;
+                }
+            }
             if (isArrowFunctionWithSingleParam()) {
                 ParsedNode arrowFunction = parseArrowFunctionWithSingleParam(initToken);
                 if (arrowFunction != null) {
@@ -798,6 +827,14 @@ public class JSXParse {
             if (token.getType().equals(JSXToken.Type.RIGHT_PARENTHESIS)) {
                 lastToken = token;
                 break;
+            }
+            if (token.getType().equals(JSXToken.Type.KEYWORD)
+                    && VARIABLE_KEY_WORD.contains(token.getValue())) {
+                unreadToken();
+                break;
+            }
+            if (token.getType().equals(JSXToken.Type.COMMENT)) {
+                continue;
             }
             if (token.getType().equals(JSXToken.Type.COMMA)) {
                 continue;
