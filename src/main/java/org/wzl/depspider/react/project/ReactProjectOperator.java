@@ -46,10 +46,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -94,6 +97,16 @@ public class ReactProjectOperator implements IReactProjectOperator {
      */
     @Getter
     private final List<File> srcFolderChildren;
+
+    /**
+     * component 文件名称索引
+     */
+    private final Map<String, List<File>> componentNameIndex = new HashMap<>();
+
+    /**
+     * component 文件名称索引是否已经构建
+     */
+    private boolean componentIndexBuilt = false;
 
     /**
      * 扫描路径
@@ -389,11 +402,17 @@ public class ReactProjectOperator implements IReactProjectOperator {
         }
         if (folder.isFile()) {
             Set<Language> languages = projectConfiguration.getLanguages();
-            if (languages.contains(Language.JS) && folder.getName().endsWith(".jsx")) {
-                allCodeFile.add(folder);
+            if (languages.contains(Language.JS)) {
+                String name = folder.getName();
+                if (name.endsWith(".jsx") || name.endsWith(".js")) {
+                    allCodeFile.add(folder);
+                }
             }
-            if (languages.contains(Language.TS) && folder.getName().endsWith(".tsx")) {
-                allCodeFile.add(folder);
+            if (languages.contains(Language.TS)) {
+                String name = folder.getName();
+                if (name.endsWith(".tsx") || name.endsWith(".ts")) {
+                    allCodeFile.add(folder);
+                }
             }
         }
         if (folder.isDirectory()) {
@@ -641,10 +660,6 @@ public class ReactProjectOperator implements IReactProjectOperator {
             return resolved;
         }
 
-        if (hasKnownExtension(importPath, extensions)) {
-            return base;
-        }
-
         File parent = base.getParentFile();
         if (parent != null) {
             for (String extension : extensions) {
@@ -654,6 +669,15 @@ public class ReactProjectOperator implements IReactProjectOperator {
                     return resolved;
                 }
             }
+        }
+
+        File searched = searchComponentInProject(importPath);
+        if (searched != null) {
+            return searched;
+        }
+
+        if (hasKnownExtension(importPath, extensions)) {
+            return base;
         }
 
         for (String extension : extensions) {
@@ -669,6 +693,179 @@ public class ReactProjectOperator implements IReactProjectOperator {
         }
 
         return base;
+    }
+
+    private File searchComponentInProject(String importPath) {
+        ensureComponentIndex();
+
+        List<String> importSegments = normalizedImportSegments(importPath);
+        if (importSegments.isEmpty()) {
+            return null;
+        }
+
+        String lastSegment = importSegments.get(importSegments.size() - 1);
+        if (lastSegment == null || lastSegment.isEmpty()) {
+            return null;
+        }
+
+        List<File> candidates = componentNameIndex.getOrDefault(lastSegment.toLowerCase(Locale.ROOT), Collections.emptyList());
+        if (candidates.isEmpty()) {
+            return null;
+        }
+
+        File best = null;
+        int bestScore = 0;
+        int bestDepth = Integer.MAX_VALUE;
+        for (File candidate : candidates) {
+            List<String> candidateSegments = componentPathSegments(candidate);
+            if (candidateSegments.isEmpty()) {
+                continue;
+            }
+            int score = suffixMatchScore(candidateSegments, importSegments);
+            if (score > bestScore || (score == bestScore && score > 0 && candidateSegments.size() < bestDepth)) {
+                best = candidate;
+                bestScore = score;
+                bestDepth = candidateSegments.size();
+            }
+        }
+
+        return bestScore > 0 ? best : null;
+    }
+
+    private void ensureComponentIndex() {
+        if (componentIndexBuilt) {
+            return;
+        }
+        synchronized (componentNameIndex) {
+            if (componentIndexBuilt) {
+                return;
+            }
+            List<File> allCodeFiles = new ArrayList<>();
+            getAllCodeFile(srcFileFolder, allCodeFiles);
+            for (File file : allCodeFiles) {
+                indexComponentFile(file);
+            }
+            componentIndexBuilt = true;
+        }
+    }
+
+    private void indexComponentFile(File file) {
+        if (file == null) {
+            return;
+        }
+        String baseName = removeFileExtension(file.getName());
+        addComponentIndexKey(baseName, file);
+        if ("index".equalsIgnoreCase(baseName)) {
+            File parent = file.getParentFile();
+            if (parent != null) {
+                addComponentIndexKey(parent.getName(), file);
+            }
+        }
+    }
+
+    private void addComponentIndexKey(String key, File file) {
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        componentNameIndex.computeIfAbsent(key.toLowerCase(Locale.ROOT), ignore -> new ArrayList<>()).add(file);
+    }
+
+    private List<String> normalizedImportSegments(String importPath) {
+        if (importPath == null) {
+            return Collections.emptyList();
+        }
+        String normalized = importPath.trim();
+        if (normalized.isEmpty()) {
+            return Collections.emptyList();
+        }
+        normalized = normalized.replace('\\', '/');
+
+        while (normalized.startsWith("./")) {
+            normalized = normalized.substring(2);
+        }
+        while (normalized.startsWith("../")) {
+            normalized = normalized.substring(3);
+        }
+
+        if (normalized.startsWith("@/")) {
+            normalized = normalized.substring(2);
+        } else if (normalized.startsWith("$src/")) {
+            normalized = normalized.substring(5);
+        } else if (normalized.startsWith("@")) {
+            normalized = normalized.substring(1);
+        }
+
+        if (normalized.startsWith("src/")) {
+            normalized = normalized.substring(4);
+        }
+
+        List<String> segments = Arrays.stream(normalized.split("/"))
+                .filter(part -> part != null && !part.isEmpty() && !".".equals(part))
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        if (segments.isEmpty()) {
+            return segments;
+        }
+
+        int lastIndex = segments.size() - 1;
+        String last = removeFileExtension(segments.get(lastIndex));
+        segments.set(lastIndex, last);
+        if ("index".equalsIgnoreCase(last)) {
+            segments.remove(lastIndex);
+        }
+
+        return segments;
+    }
+
+    private List<String> componentPathSegments(File file) {
+        String relative = projectRelativePath(file);
+        if (relative == null || relative.isEmpty()) {
+            return Collections.emptyList();
+        }
+        String normalized = relative.replace('\\', '/');
+        if (normalized.startsWith("src/")) {
+            normalized = normalized.substring(4);
+        }
+        List<String> segments = Arrays.stream(normalized.split("/"))
+                .filter(part -> part != null && !part.isEmpty())
+                .collect(Collectors.toCollection(ArrayList::new));
+        if (segments.isEmpty()) {
+            return segments;
+        }
+
+        int lastIndex = segments.size() - 1;
+        String last = removeFileExtension(segments.get(lastIndex));
+        segments.set(lastIndex, last);
+        if ("index".equalsIgnoreCase(last) && segments.size() > 1) {
+            segments.remove(lastIndex);
+        }
+        return segments;
+    }
+
+    private int suffixMatchScore(List<String> candidateSegments, List<String> importSegments) {
+        int i = candidateSegments.size() - 1;
+        int j = importSegments.size() - 1;
+        int score = 0;
+        while (i >= 0 && j >= 0) {
+            if (!candidateSegments.get(i).equalsIgnoreCase(importSegments.get(j))) {
+                break;
+            }
+            score++;
+            i--;
+            j--;
+        }
+        return score;
+    }
+
+    private String removeFileExtension(String value) {
+        if (value == null) {
+            return null;
+        }
+        int dotIndex = value.lastIndexOf('.');
+        if (dotIndex > 0) {
+            return value.substring(0, dotIndex);
+        }
+        return value;
     }
 
     private File resolveExistingComponent(File candidate, List<String> extensions) {
