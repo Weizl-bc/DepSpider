@@ -59,7 +59,9 @@ public class JSXFileOperation {
                        return "";
                     }).collect(Collectors.toList())
             );
-            importInfo.setSource(importDeclarationNode.getSource().getValue());
+            importInfo.setSource(importDeclarationNode.getSource() == null
+                    ? null
+                    : importDeclarationNode.getSource().getValue());
             return importInfo;
         }).collect(Collectors.toList());
     }
