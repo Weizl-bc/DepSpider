@@ -462,13 +462,13 @@ public class ReactProjectOperator implements IReactProjectOperator {
         if (programNode == null) {
             return Collections.emptyList();
         }
-        String content = "";
+        String content;
         try {
             content = FileUtil.readFileContent(routeFile);
-        } catch (Exception e) {
-            log.error("extractRouteDefinesFromJsx# read file fail", e);
+        } catch (IOException e) {
+            log.warn("读取文件失败: {}", routeFile.getAbsolutePath(), e);
+            return routes;
         }
-
         if (content.isEmpty()) {
             return Collections.emptyList();
         }
