@@ -112,6 +112,9 @@ public class JSXImportVisitor implements JSXNodeVisitor<Void> {
 
     @Override
     public Void visit(ImportDeclarationNode node) {
+        if (node.getSource() == null) {
+            return null;
+        }
         String importSource = node.getSource().getValue();
         List<String> importItems = new ArrayList<>();
         for (Specifier specifier : node.getSpecifiers()) {

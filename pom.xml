@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.github.1807149205</groupId>
     <artifactId>depspider</artifactId>
-    <version>0.0.10</version>
+    <version>0.0.11</version>
     <name>DepSpider</name>
     <description>This framework is built with Java and is designed to scan and analyze page-level component dependencies within React-based front-end projects.</description>
     <url>https://github.com/1807149205/DepSpider</url>

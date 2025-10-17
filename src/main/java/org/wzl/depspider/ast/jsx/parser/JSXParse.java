@@ -45,6 +45,8 @@ public class JSXParse {
 
     private final int tokenSize;
 
+    private final String filePath;
+
     @Getter
     private Boolean isImportOnly = false;
 
@@ -112,6 +114,7 @@ public class JSXParse {
     }
 
     public JSXParse(String filePath) {
+        this.filePath = filePath;
         String inputString;
         try {
             inputString = FileUtil.getInputString(filePath);
@@ -175,7 +178,12 @@ public class JSXParse {
         //设置源代码类型
         programNode.setSourceType(currentSourceType());
         //设置body
-        programNode.setBody(getProgramBody());
+        if (filePath.endsWith(".js") || filePath.endsWith(".ts") || filePath.endsWith(".jsx") || filePath.endsWith(".tsx")) {
+            programNode.setBody(getProgramBody());
+        } else {
+            programNode.setBody(new ArrayList<>());
+        }
+
         return programNode;
     }
 
@@ -1227,8 +1235,19 @@ public class JSXParse {
 
          */
         //设置source，也就是 import从哪里导入的
-        nextToken(); //跳过 from 关键字
-        Token sourceToken = nextToken();
+        Token sourceToken = null;
+        Token peekTokenAfterSpecifiers = peekNextToken();
+        if (peekTokenAfterSpecifiers != null) {
+            boolean hasFromKeyword = peekTokenAfterSpecifiers.getType().equals(JSXToken.Type.KEYWORD)
+                    && "from".equals(peekTokenAfterSpecifiers.getValue());
+            if (hasFromKeyword) {
+                nextToken(); // 跳过 from 关键字
+                sourceToken = nextToken();
+            } else if (peekTokenAfterSpecifiers.getType().equals(JSXToken.Type.STRING)) {
+                // import './styles/index.scss'; 这种语法
+                sourceToken = nextToken();
+            }
+        }
         StringLiteral source = getStringLiteral(sourceToken);
 
         importDeclarationNode.setSource(source);
@@ -1236,6 +1255,9 @@ public class JSXParse {
     }
 
     private static StringLiteral getStringLiteral(Token sourceToken) {
+        if (sourceToken == null) {
+            return null;
+        }
         String value = sourceToken.getValue();
         // 结束位置待定
         return new StringLiteral(
