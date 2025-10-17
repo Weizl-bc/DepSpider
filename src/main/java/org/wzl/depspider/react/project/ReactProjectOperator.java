@@ -747,11 +747,11 @@ public class ReactProjectOperator implements IReactProjectOperator {
             throw new ReactProjectValidException("package.json中没有dependencies字段");
         }
 
-        JSONObject dependenciesJson = (JSONObject) dependencies;
-        if (!dependenciesJson.containsKey("react-router")
-                && !dependenciesJson.containsKey("react-router-dom")) {
-            throw new ReactProjectValidException("项目中没有引入react-router或react-router-dom");
-        }
+//        JSONObject dependenciesJson = (JSONObject) dependencies;
+//        if (!dependenciesJson.containsKey("react-router")
+//                && !dependenciesJson.containsKey("react-router-dom")) {
+//            throw new ReactProjectValidException("项目中没有引入react-router或react-router-dom");
+//        }
     }
 
     /**
