@@ -462,13 +462,13 @@ public class ReactProjectOperator implements IReactProjectOperator {
         if (programNode == null) {
             return Collections.emptyList();
         }
-        String content;
+        String content = "";
         try {
             content = FileUtil.readFileContent(routeFile);
-        } catch (IOException e) {
-            log.warn("读取文件失败: {}", routeFile.getAbsolutePath(), e);
-            return routes;
+        } catch (Exception e) {
+            log.error("extractRouteDefinesFromJsx# read file fail", e);
         }
+
         if (content.isEmpty()) {
             return Collections.emptyList();
         }
@@ -747,11 +747,11 @@ public class ReactProjectOperator implements IReactProjectOperator {
             throw new ReactProjectValidException("package.json中没有dependencies字段");
         }
 
-        JSONObject dependenciesJson = (JSONObject) dependencies;
-        if (!dependenciesJson.containsKey("react-router")
-                && !dependenciesJson.containsKey("react-router-dom")) {
-            throw new ReactProjectValidException("项目中没有引入react-router或react-router-dom");
-        }
+//        JSONObject dependenciesJson = (JSONObject) dependencies;
+//        if (!dependenciesJson.containsKey("react-router")
+//                && !dependenciesJson.containsKey("react-router-dom")) {
+//            throw new ReactProjectValidException("项目中没有引入react-router或react-router-dom");
+//        }
     }
 
     /**
