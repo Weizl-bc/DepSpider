@@ -45,11 +45,14 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -337,9 +340,42 @@ public class ReactProjectOperator implements IReactProjectOperator {
     public List<PageRouterDefine> findPageRouterDefine() {
         //校验是否引入了react-router
         validReactRouter();
-        //获取入口的index.js 或 jsx 、 tsx文件
-        //TODO 目前只支持从入口文件开始解析路由
-        return null;
+        List<File> entryFiles = discoverEntryFiles();
+        if (entryFiles.isEmpty()) {
+            throw new ReactProjectValidException("未找到项目入口文件");
+        }
+
+        Map<String, PageRouterDefine> collected = new LinkedHashMap<>();
+        Deque<File> toVisit = new ArrayDeque<>(entryFiles);
+        Set<File> visited = new HashSet<>();
+
+        while (!toVisit.isEmpty()) {
+            File current = toVisit.pollFirst();
+            if (current == null || !current.exists() || !current.isFile()) {
+                continue;
+            }
+            if (!visited.add(current)) {
+                continue;
+            }
+
+            RouteAnalysisResult analysisResult = analyzeRouteFile(current);
+            for (PageRouterDefine define : analysisResult.getRouteDefines()) {
+                if (define == null || define.getRoutePath() == null) {
+                    continue;
+                }
+                String key = define.getRoutePath() + "|" +
+                        (define.getRelativeFilePath() == null ? "" : define.getRelativeFilePath());
+                collected.putIfAbsent(key, define);
+            }
+
+            for (File imported : analysisResult.getImportedProjectFiles()) {
+                if (imported != null && imported.exists() && imported.isFile() && !visited.contains(imported)) {
+                    toVisit.addLast(imported);
+                }
+            }
+        }
+
+        return new ArrayList<>(collected.values());
     }
 
     @Override
@@ -353,25 +389,352 @@ public class ReactProjectOperator implements IReactProjectOperator {
             throw new ReactProjectValidException("路由配置文件不存在: " + relativeFilePath);
         }
 
-        JSXParse jsxParse = new JSXParse(routeFile.getAbsolutePath());
-        FileNode fileNode = jsxParse.parse();
-        if (fileNode == null || fileNode.getProgram() == null) {
-            return new ArrayList<>();
+        return analyzeRouteFile(routeFile).getRouteDefines();
+    }
+
+    private RouteAnalysisResult analyzeRouteFile(File routeFile) {
+        ProgramNode programNode = safeParseProgram(routeFile);
+        if (programNode == null) {
+            return new RouteAnalysisResult(Collections.emptyList(), Collections.emptyList());
         }
 
-        ProgramNode programNode = fileNode.getProgram();
         Map<String, Node> bindings = collectTopLevelBindings(programNode);
         Map<String, File> importComponentMap = collectImportComponentMap(programNode, routeFile);
         List<PageRouterDefine> defines = new ArrayList<>();
 
+        if (programNode.getBody() != null) {
+            for (Node node : programNode.getBody()) {
+                if (node instanceof ExportDefaultDeclaration) {
+                    Node declaration = ((ExportDefaultDeclaration) node).getDeclaration();
+                    defines.addAll(extractRouteDefinesFromDeclaration(declaration, bindings, importComponentMap, routeFile));
+                }
+            }
+        }
+
+        defines.addAll(extractRouteDefinesFromJsx(programNode, bindings, importComponentMap, routeFile));
+
+        List<PageRouterDefine> deduplicated = deduplicateRoutes(defines);
+        List<File> imports = collectProjectImportFiles(programNode, routeFile);
+        return new RouteAnalysisResult(deduplicated, imports);
+    }
+
+    private ProgramNode safeParseProgram(File file) {
+        try {
+            JSXParse jsxParse = new JSXParse(file.getAbsolutePath());
+            FileNode fileNode = jsxParse.parse();
+            return fileNode == null ? null : fileNode.getProgram();
+        } catch (Exception ex) {
+            log.warn("解析文件失败: {}", file.getAbsolutePath(), ex);
+            return null;
+        }
+    }
+
+    private List<File> collectProjectImportFiles(ProgramNode programNode, File currentFile) {
+        if (programNode == null || programNode.getBody() == null) {
+            return Collections.emptyList();
+        }
+        List<File> result = new ArrayList<>();
         for (Node node : programNode.getBody()) {
-            if (node instanceof ExportDefaultDeclaration) {
-                Node declaration = ((ExportDefaultDeclaration) node).getDeclaration();
-                defines.addAll(extractRouteDefinesFromDeclaration(declaration, bindings, importComponentMap, routeFile));
+            if (node instanceof ImportDeclarationNode) {
+                ImportDeclarationNode importDeclarationNode = (ImportDeclarationNode) node;
+                String importPath = importDeclarationNode.getSource() == null
+                        ? null
+                        : stripQuotes(importDeclarationNode.getSource().getValue());
+                if (importPath == null || importPath.isEmpty()) {
+                    continue;
+                }
+                if (!isProjectImport(importPath)) {
+                    continue;
+                }
+                File resolved = resolveComponentFile(currentFile, importPath);
+                if (resolved != null && resolved.exists() && resolved.isFile()) {
+                    result.add(resolved);
+                }
+            }
+        }
+        return result;
+    }
+
+    private List<PageRouterDefine> extractRouteDefinesFromJsx(ProgramNode programNode,
+                                                              Map<String, Node> bindings,
+                                                              Map<String, File> importComponentMap,
+                                                              File routeFile) {
+        if (programNode == null) {
+            return Collections.emptyList();
+        }
+        String content = readFileContent(routeFile);
+        if (content.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        Pattern routePattern = Pattern.compile("<Route\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = routePattern.matcher(content);
+        List<PageRouterDefine> defines = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+
+        while (matcher.find()) {
+            String attributes = matcher.group(1);
+            if (attributes == null || attributes.isEmpty()) {
+                continue;
+            }
+            String pathValue = extractJsxAttribute(attributes, "path");
+            String routePath = normalizeJsxAttributeValue(pathValue);
+            if (routePath == null || routePath.isEmpty()) {
+                continue;
+            }
+
+            String componentRaw = extractJsxAttribute(attributes, "component");
+            if (componentRaw == null) {
+                componentRaw = extractJsxAttribute(attributes, "element");
+            }
+
+            File componentFile = resolveComponentFromJsxAttribute(componentRaw, importComponentMap, bindings, routeFile);
+
+            PageRouterDefine define = new PageRouterDefine();
+            define.setRoutePath(routePath);
+            define.setTitle("");
+            define.setComponentFile(componentFile);
+            define.setRelativeFilePath(componentFile != null ? projectRelativePath(componentFile) : null);
+            define.setComponentFileExists(componentFile != null && componentFile.exists());
+
+            String key = define.getRoutePath() + "|" + (define.getRelativeFilePath() == null ? "" : define.getRelativeFilePath());
+            if (seen.add(key)) {
+                defines.add(define);
             }
         }
 
         return defines;
+    }
+
+    private String extractJsxAttribute(String attributes, String attributeName) {
+        if (attributes == null || attributeName == null) {
+            return null;
+        }
+        Pattern attributePattern = Pattern.compile(attributeName + "\\s*=\\s*(\"[^\"]*\"|'[^']*'|\\{[^}]*\\})",
+                Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+        Matcher matcher = attributePattern.matcher(attributes);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return null;
+    }
+
+    private String normalizeJsxAttributeValue(String rawValue) {
+        if (rawValue == null) {
+            return null;
+        }
+        String trimmed = rawValue.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+                || (trimmed.startsWith("`") && trimmed.endsWith("`"))) {
+            return trimmed.substring(1, trimmed.length() - 1);
+        }
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+            if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                    || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+                    || (trimmed.startsWith("`") && trimmed.endsWith("`"))) {
+                return trimmed.substring(1, trimmed.length() - 1);
+            }
+            return trimmed;
+        }
+        return trimmed;
+    }
+
+    private File resolveComponentFromJsxAttribute(String componentRaw,
+                                                  Map<String, File> importComponentMap,
+                                                  Map<String, Node> bindings,
+                                                  File routeFile) {
+        if (componentRaw == null) {
+            return null;
+        }
+        String trimmed = componentRaw.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1).trim();
+        }
+        if ((trimmed.startsWith("\"") && trimmed.endsWith("\""))
+                || (trimmed.startsWith("'") && trimmed.endsWith("'"))
+                || (trimmed.startsWith("`") && trimmed.endsWith("`"))) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+        }
+        if (trimmed.startsWith("<")) {
+            Matcher matcher = Pattern.compile("<\\s*([A-Za-z_$][A-Za-z0-9_$.]*)").matcher(trimmed);
+            if (matcher.find()) {
+                trimmed = matcher.group(1);
+            }
+        }
+        if (trimmed.startsWith("() =>") || trimmed.startsWith("async ") || trimmed.startsWith("function")) {
+            Matcher importMatcher = Pattern.compile("import\\((['\"])\\s*([^'\"]+)\\s*\\1\\)").matcher(trimmed);
+            if (importMatcher.find()) {
+                String importPath = importMatcher.group(2);
+                return resolveComponentFile(routeFile, importPath);
+            }
+        }
+        if (trimmed.contains(".")) {
+            trimmed = trimmed.substring(trimmed.lastIndexOf('.') + 1);
+        }
+        if (importComponentMap != null && importComponentMap.containsKey(trimmed)) {
+            return importComponentMap.get(trimmed);
+        }
+        return resolveComponentFromBindingReference(trimmed, importComponentMap, bindings, routeFile, new HashSet<>());
+    }
+
+    private File resolveComponentFromBindingReference(String identifier,
+                                                      Map<String, File> importComponentMap,
+                                                      Map<String, Node> bindings,
+                                                      File routeFile,
+                                                      Set<String> resolving) {
+        if (identifier == null || identifier.isEmpty() || bindings == null) {
+            return null;
+        }
+        if (!resolving.add(identifier)) {
+            return null;
+        }
+        try {
+            Node binding = bindings.get(identifier);
+            if (binding == null) {
+                return null;
+            }
+            File resolved = resolveComponentBindingNode(binding, importComponentMap, bindings, routeFile, resolving);
+            if (resolved != null) {
+                return resolved;
+            }
+            if (binding instanceof Identifier) {
+                String name = ((Identifier) binding).getName();
+                if (name != null && !name.equals(identifier)) {
+                    return resolveComponentFromBindingReference(name, importComponentMap, bindings, routeFile, resolving);
+                }
+            }
+            return null;
+        } finally {
+            resolving.remove(identifier);
+        }
+    }
+
+    private File resolveComponentBindingNode(Node node,
+                                             Map<String, File> importComponentMap,
+                                             Map<String, Node> bindings,
+                                             File routeFile,
+                                             Set<String> resolving) {
+        if (node == null) {
+            return null;
+        }
+        File resolved = resolveLazyComponentFile(node, routeFile);
+        if (resolved != null) {
+            return resolved;
+        }
+        if (node instanceof Identifier) {
+            String name = ((Identifier) node).getName();
+            if (name != null) {
+                if (importComponentMap != null && importComponentMap.containsKey(name)) {
+                    return importComponentMap.get(name);
+                }
+                return resolveComponentFromBindingReference(name, importComponentMap, bindings, routeFile, resolving);
+            }
+        }
+        if (node instanceof CallExpression) {
+            CallExpression callExpression = (CallExpression) node;
+            if (callExpression.getArguments() != null) {
+                for (Expression argument : callExpression.getArguments()) {
+                    if (argument instanceof Node) {
+                        File nested = resolveComponentBindingNode((Node) argument, importComponentMap, bindings, routeFile, resolving);
+                        if (nested != null) {
+                            return nested;
+                        }
+                    }
+                }
+            }
+        }
+        if (node instanceof MemberExpression) {
+            Expression object = ((MemberExpression) node).getObject();
+            if (object instanceof Identifier) {
+                String name = ((Identifier) object).getName();
+                return resolveComponentFromBindingReference(name, importComponentMap, bindings, routeFile, resolving);
+            }
+        }
+        return null;
+    }
+
+    private List<PageRouterDefine> deduplicateRoutes(List<PageRouterDefine> defines) {
+        if (defines == null || defines.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<String, PageRouterDefine> map = new LinkedHashMap<>();
+        for (PageRouterDefine define : defines) {
+            if (define == null || define.getRoutePath() == null) {
+                continue;
+            }
+            String key = define.getRoutePath() + "|" + (define.getRelativeFilePath() == null ? "" : define.getRelativeFilePath());
+            map.putIfAbsent(key, define);
+        }
+        return new ArrayList<>(map.values());
+    }
+
+    private String readFileContent(File file) {
+        try {
+            return Files.readString(file.toPath(), StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            log.warn("读取文件失败: {}", file.getAbsolutePath(), e);
+            return "";
+        }
+    }
+
+    private List<File> discoverEntryFiles() {
+        List<File> entries = new ArrayList<>();
+        if (projectIndexFile != null && projectIndexFile.exists() && projectIndexFile.isFile()) {
+            entries.add(projectIndexFile);
+        }
+
+        String[] candidates = {
+                "index.tsx", "index.ts", "index.jsx", "index.js",
+                "main.tsx", "main.ts", "main.jsx", "main.js",
+                "app.tsx", "app.ts", "app.jsx", "app.js"
+        };
+
+        for (String candidate : candidates) {
+            File file = new File(srcFileFolder, candidate);
+            if (file.exists() && file.isFile() && !entries.contains(file)) {
+                entries.add(file);
+            }
+        }
+
+        if (entries.isEmpty()) {
+            Map<String, List<String>> importMap = new HashMap<>();
+            importMap.put("react-router-dom", null);
+            importMap.put("react-router", null);
+            List<File> routerFiles = findJsxFileWithImport(importMap);
+            for (File routerFile : routerFiles) {
+                if (routerFile != null && routerFile.exists() && routerFile.isFile() && !entries.contains(routerFile)) {
+                    entries.add(routerFile);
+                }
+            }
+        }
+
+        return entries;
+    }
+
+    private static class RouteAnalysisResult {
+        private final List<PageRouterDefine> routeDefines;
+        private final List<File> importedProjectFiles;
+
+        RouteAnalysisResult(List<PageRouterDefine> routeDefines, List<File> importedProjectFiles) {
+            this.routeDefines = routeDefines;
+            this.importedProjectFiles = importedProjectFiles;
+        }
+
+        List<PageRouterDefine> getRouteDefines() {
+            return routeDefines;
+        }
+
+        List<File> getImportedProjectFiles() {
+            return importedProjectFiles;
+        }
     }
 
     /**
