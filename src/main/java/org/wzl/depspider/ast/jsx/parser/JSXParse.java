@@ -45,6 +45,8 @@ public class JSXParse {
 
     private final int tokenSize;
 
+    private final String filePath;
+
     @Getter
     private Boolean isImportOnly = false;
 
@@ -112,6 +114,7 @@ public class JSXParse {
     }
 
     public JSXParse(String filePath) {
+        this.filePath = filePath;
         String inputString;
         try {
             inputString = FileUtil.getInputString(filePath);
@@ -175,7 +178,12 @@ public class JSXParse {
         //设置源代码类型
         programNode.setSourceType(currentSourceType());
         //设置body
-        programNode.setBody(getProgramBody());
+        if (filePath.endsWith(".js") || filePath.endsWith(".ts") || filePath.endsWith(".jsx") || filePath.endsWith(".tsx")) {
+            programNode.setBody(getProgramBody());
+        } else {
+            programNode.setBody(new ArrayList<>());
+        }
+
         return programNode;
     }
 

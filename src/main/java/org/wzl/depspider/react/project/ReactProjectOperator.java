@@ -465,10 +465,9 @@ public class ReactProjectOperator implements IReactProjectOperator {
         String content = "";
         try {
             content = FileUtil.readFileContent(routeFile);
-        } catch (Exception e) {
-            log.error("extractRouteDefinesFromJsx# read file fail", e);
+        } catch (IOException e) {
+            log.warn("读取文件失败: {}", routeFile.getAbsolutePath(), e);
         }
-
         if (content.isEmpty()) {
             return Collections.emptyList();
         }
