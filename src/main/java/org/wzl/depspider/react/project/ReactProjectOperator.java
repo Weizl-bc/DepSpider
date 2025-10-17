@@ -462,7 +462,13 @@ public class ReactProjectOperator implements IReactProjectOperator {
         if (programNode == null) {
             return Collections.emptyList();
         }
-        String content = readFileContent(routeFile);
+        String content;
+        try {
+            content = FileUtil.readFileContent(routeFile);
+        } catch (IOException e) {
+            log.warn("读取文件失败: {}", routeFile.getAbsolutePath(), e);
+            return routes;
+        }
         if (content.isEmpty()) {
             return Collections.emptyList();
         }
@@ -674,15 +680,6 @@ public class ReactProjectOperator implements IReactProjectOperator {
             map.putIfAbsent(key, define);
         }
         return new ArrayList<>(map.values());
-    }
-
-    private String readFileContent(File file) {
-        try {
-            return Files.readString(file.toPath(), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            log.warn("读取文件失败: {}", file.getAbsolutePath(), e);
-            return "";
-        }
     }
 
     private List<File> discoverEntryFiles() {
