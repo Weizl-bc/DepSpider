@@ -31,6 +31,16 @@ public class FileUtil {
         return getInputString(file.getAbsolutePath());
     }
 
+    /**
+     * 读取文件内容
+     * @param file 文件
+     * @return 文件内容
+     * @throws IOException 异常
+     */
+    public static String readFileContent(File file) throws IOException {
+        return getInputString(file);
+    }
+
 
     /**
      * 从指定的根文件夹开始，按照给定的路径层级依次进入子目录，返回最终的目标文件夹。
